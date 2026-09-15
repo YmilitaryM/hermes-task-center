@@ -1,0 +1,5 @@
+name: task-center
+version: 0.1.0
+description: "Hermes dashboard plugin: Task Center — triage sessions into active / interrupted / ended with one-click rescue of interrupted tasks."
+author: ymilitarym
+requires_hermes: ">=0.21"
