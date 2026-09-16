@@ -1,17 +1,20 @@
-"""任务中心插件后端，挂载在 /api/plugins/task-center/。
+"""Task Center plugin backend, mounted at /api/plugins/task-center/.
 
-聚合 Hermes 会话三态：活跃 / 中断待营救 / 已结束。
+Aggregates Hermes sessions into three states: active / interrupted / ended.
 
-判定依据（经真实数据验证）：
-- 已结束 = ended_at 有值，且 end_reason 是正常结束（cron_complete / session_reset / idle_timeout 等）
-- 中断待营救 = 两类：
-    1) ended_at 有值，但 end_reason 是异常中断（ws_orphan_reap / startup_orphan_reap / lru_evict /
-       cron_incomplete_no_output）——数据仍在库，可 resume 救回；
-    2) ended_at 仍为 NULL，但 last_active 已超过活跃阈值（进程死掉留下的孤儿，orphan sweep 尚未收尾）。
-- 活跃 = ended_at NULL 且 last_active 在活跃阈值内。
+Classification (verified against real data):
+- ended = ended_at is set and end_reason is a normal end (cron_complete / session_reset / idle_timeout, etc.)
+- interrupted = two kinds:
+    1) ended_at is set but end_reason is an abnormal interruption (ws_orphan_reap /
+       startup_orphan_reap / lru_evict / cron_incomplete_no_output) — data is still in
+       the store and can be rescued via resume;
+    2) ended_at is still NULL but last_active is past the activity threshold (an orphan
+       left by a dead process, not yet swept).
+- active = ended_at NULL and last_active within the activity threshold.
 
-营救（resume）靠前端导航到 /chat?resume=<id> 复用 dashboard 现有 PTY resume 机制，
-后端不做进程内 resume（session.resume 依赖 current_transport() 这个 RPC contextvar，REST 上下文没有）。
+Rescue is client-side navigation to /chat?resume=<id>, reusing the dashboard's PTY
+resume mechanism. The backend does not resume in-process (session.resume depends on
+current_transport(), an RPC contextvar that REST requests lack).
 """
 from __future__ import annotations
 
@@ -22,18 +25,18 @@ from fastapi import APIRouter
 
 router = APIRouter()
 
-# 最近活跃的会话最多拉这么多条做三态分组。
+# Cap on how many most-recently-active sessions to pull for triage.
 _SESSION_LIMIT = 300
 
-# 正常结束的 end_reason：主动/例行结束，不是"中断"。
+# Normal end_reason values: clean finishes, not interruptions.
 _NORMAL_END_REASONS = frozenset({
     "cron_complete",
     "session_reset",
     "idle_timeout",
 })
 
-# 异常中断的 end_reason：连接断开被孤儿回收、进程重启孤儿、LRU 淘汰、cron 无输出。
-# 这些会话数据仍在库，resume 可救回。
+# Abnormal end_reason values: connection dropped / process restart / LRU eviction /
+# cron no-output. These sessions are still in the store and resumable.
 _INTERRUPTED_END_REASONS = frozenset({
     "ws_orphan_reap",
     "startup_orphan_reap",
@@ -41,8 +44,8 @@ _INTERRUPTED_END_REASONS = frozenset({
     "cron_incomplete_no_output",
 })
 
-# ended_at 仍为 NULL 时，last_active 超过这个秒数判定为"孤儿"（进程死掉未收尾）。
-_ACTIVE_TTL_S = 6 * 3600  # 6 小时，对齐 Hermes 的 session TTL。
+# When ended_at is NULL, a last_active older than this many seconds marks an orphan.
+_ACTIVE_TTL_S = 6 * 3600  # 6h, aligned with Hermes session TTL.
 
 
 def _classify(rows: List[Dict[str, Any]], now: float | None = None) -> Dict[str, Any]:
@@ -57,13 +60,13 @@ def _classify(rows: List[Dict[str, Any]], now: float | None = None) -> Dict[str,
         last_active = r.get("last_active")
 
         if ended_at is not None:
-            # 已结束：正常结束 vs 异常中断，用 end_reason 区分。
+            # ended_at set: normal end vs interrupted, decided by end_reason.
             if end_reason in _INTERRUPTED_END_REASONS:
                 interrupted.append(r)
             else:
                 ended.append(r)
         else:
-            # ended_at NULL：活跃 vs 孤儿，用 last_active 年龄区分。
+            # ended_at NULL: active vs orphan, decided by last_active age.
             try:
                 age = now - float(last_active) if last_active else None
             except (TypeError, ValueError):
@@ -77,10 +80,10 @@ def _classify(rows: List[Dict[str, Any]], now: float | None = None) -> Dict[str,
 
 
 def _shape(row: Dict[str, Any]) -> Dict[str, Any]:
-    """只把前端需要的字段吐出去，避免原始字段泄漏。"""
+    """Expose only the fields the frontend needs; avoid leaking raw fields."""
     return {
         "id": row.get("id"),
-        "title": row.get("title") or row.get("preview") or "(未命名)",
+        "title": row.get("title") or row.get("preview") or "(Untitled)",
         "source": row.get("source"),
         "model": row.get("model"),
         "started_at": row.get("started_at"),
@@ -100,7 +103,7 @@ def tasks(limit: int = _SESSION_LIMIT) -> Dict[str, Any]:
         return {
             "active": [], "interrupted": [], "ended": [],
             "counts": {"active": 0, "interrupted": 0, "ended": 0},
-            "error": f"无法打开会话库: {exc}",
+            "error": f"Failed to open session DB: {exc}",
             "generated_at": int(time.time()),
         }
 

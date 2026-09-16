@@ -1,4 +1,4 @@
-# Hermes Task Center (任务中心)
+# Hermes Task Center
 
 A [Hermes Agent](https://hermes-agent.nousresearch.com/) dashboard plugin that gives you a
 single pane of glass over every session — triaged into three states, with one-click rescue
@@ -13,7 +13,7 @@ produces no output, a laptop sleeps. The data is still in the session store, but
 Task Center classifies your most recent 300 sessions into:
 
 - **Active** — `ended_at` is NULL and last activity is recent
-- **Interrupted (待营救)** — ended abnormally (`ws_orphan_reap`, `startup_orphan_reap`,
+- **Interrupted** — ended abnormally (`ws_orphan_reap`, `startup_orphan_reap`,
   `lru_evict`, `cron_incomplete_no_output`) or the process died without cleanup (orphaned)
 - **Ended** — finished normally (`cron_complete`, `session_reset`, `idle_timeout`)
 

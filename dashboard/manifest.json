@@ -1,9 +1,9 @@
 {
   "name": "task-center",
-  "label": "任务中心",
-  "description": "查看当前任务、中断的任务，并一键营救中断的任务。",
+  "label": "Task Center",
+  "description": "View current and interrupted tasks, and rescue interrupted ones in one click.",
   "icon": "Activity",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "tab": { "path": "/tasks", "position": "after:sessions" },
   "entry": "dist/index.js",
   "api": "plugin_api.py"
